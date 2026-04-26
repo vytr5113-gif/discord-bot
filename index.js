@@ -1,3 +1,33 @@
+require("dotenv").config();
+
+const { Client, GatewayIntentBits } = require("discord.js");
+const http = require("http");
+const OpenAI = require("openai");
+
+console.log("Starting TVRust bot...");
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+});
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+// Web server для Render
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("Bot is running");
+});
+
+server.listen(process.env.PORT || 3000, () => {
+  console.log("Web server running");
+});
+
 const SYSTEM_PROMPT = `
 Ты официальный бот поддержки проекта TVRust.
 
@@ -675,7 +705,7 @@ TVSTART
 "Заявка на разбан рассматривается через тикет. Ожидай ответа администрации."
 
 Не обещай разбан.
-Не говори, что игрок прав.
+Не говорi, что игрок прав.
 Не говори, что бан ошибочный.
 Не спорь.
 
@@ -872,3 +902,147 @@ TVSTART
 ФИНАЛЬНОЕ ПРАВИЛО:
 Лучше ответить коротко и честно, чем красиво, но неправильно.
 `;
+
+const ignoredMessages = [
+  "а",
+  "ок",
+  "окей",
+  "лол",
+  "кек",
+  "?",
+  "??",
+  ".",
+  "!",
+  "спс",
+  "спасибо",
+  "пон",
+  "ясно",
+  "угу",
+  "ага",
+  "хм",
+  "мм",
+];
+
+const allowedChannels = ["поддержка", "ticket", "тикет"];
+
+const repliedMessages = new Set();
+
+client.once("clientReady", () => {
+  console.log(`Bot logged in as ${client.user.tag}`);
+});
+
+client.on("messageCreate", async (message) => {
+  if (message.author.bot) return;
+
+  if (repliedMessages.has(message.id)) return;
+  repliedMessages.add(message.id);
+
+  const text = message.content.trim();
+  const lowerText = text.toLowerCase();
+
+  if (!text) return;
+  if (ignoredMessages.includes(lowerText)) return;
+  if (lowerText.length < 3) return;
+
+  const channelName = message.channel.name?.toLowerCase() || "";
+
+  const isAllowedChannel = allowedChannels.some((name) =>
+    channelName.includes(name)
+  );
+
+  if (!isAllowedChannel) return;
+
+  // Быстрые ответы без GPT, чтобы не тратить деньги и не ошибаться
+  if (
+    lowerText.includes("когда вайп") ||
+    lowerText.includes("следующий вайп") ||
+    lowerText.includes("во сколько вайп")
+  ) {
+    return message.reply("Вайп каждый понедельник в 17:00 🙂");
+  }
+
+  if (
+    lowerText.includes("как зайти") ||
+    lowerText.includes("айпи") ||
+    lowerText.includes("ip сервера") ||
+    lowerText.includes("connect")
+  ) {
+    return message.reply("Открой Rust, нажми F1 и введи: connect 1.tvrust.ru");
+  }
+
+  if (
+    lowerText.includes("x2 работает на печ") ||
+    lowerText.includes("х2 работает на печ") ||
+    lowerText.includes("печка x2") ||
+    lowerText.includes("печка х2")
+  ) {
+    return message.reply(
+      "Да, на TVRust печки тоже x2 — ресурсы плавятся быстрее 🙂"
+    );
+  }
+
+  if (
+    lowerText.includes("донат не приш") ||
+    lowerText.includes("не пришел донат") ||
+    lowerText.includes("не пришёл донат") ||
+    lowerText.includes("покупка не приш")
+  ) {
+    return message.reply(
+      "Понял, сейчас подключу администрацию для проверки 🙂\n@administrator @moderator"
+    );
+  }
+
+  if (
+    lowerText.includes("читер") ||
+    lowerText.includes("софт") ||
+    lowerText.includes("читы")
+  ) {
+    return message.reply(
+      "Укажи ник игрока и приложи доказательства, если есть 🙂\n@administrator @moderator"
+    );
+  }
+
+  if (
+    lowerText.includes("позвать админа") ||
+    lowerText.includes("нужен админ") ||
+    lowerText.includes("нужен модератор") ||
+    lowerText.includes("позовите администратора") ||
+    lowerText.includes("живого человека")
+  ) {
+    return message.reply(
+      "Понял, передаю администрации 🙂\n@administrator @moderator"
+    );
+  }
+
+  try {
+    await message.channel.sendTyping();
+
+    console.log("USER:", message.author.username, text);
+
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: text },
+      ],
+      temperature: 0.3,
+      max_tokens: 350,
+    });
+
+    const reply = response.choices?.[0]?.message?.content?.trim();
+
+    if (!reply) return;
+
+    console.log("BOT:", reply);
+
+    await message.reply(reply.slice(0, 1900));
+  } catch (error) {
+    console.error("OPENAI OR BOT ERROR:", error);
+
+    await message.reply(
+      "Понял, это технический момент, подключаю администрацию 🙂\n@administrator @moderator"
+    );
+  }
+});
+
+client.login(process.env.DISCORD_TOKEN);
